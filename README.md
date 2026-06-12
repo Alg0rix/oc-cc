@@ -27,7 +27,7 @@ The proxy:
 ```bash
 git clone https://github.com/Alg0rix/oc-cc.git
 cd oc-cc
-pip install -r requirements.txt
+# no dependencies to install — uses only Python stdlib
 ```
 
 Make sure you have an OpenCode Go API key saved by the OpenCode CLI in:

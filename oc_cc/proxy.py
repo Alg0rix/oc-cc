@@ -1,7 +1,8 @@
 """Anthropic-to-OpenAI proxy for OpenCode Go API."""
 import argparse, json, os, sys, uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import requests
+import urllib.request
+import urllib.error
 
 AUTH_PATH = os.path.expanduser("~/.local/share/opencode/auth.json")
 BASE_URL = os.environ.get("OPENCODE_GO_BASE_URL", "https://opencode.ai/zen/go/v1")
@@ -23,6 +24,54 @@ def send_event(wfile, event, data):
     wfile.write(f"event: {event}\n".encode("utf-8"))
     wfile.write(f"data: {json.dumps(data)}\n\n".encode("utf-8"))
     wfile.flush()
+
+
+class HTTPResponse:
+    """Tiny wrapper around urllib response."""
+    def __init__(self, status, body=None, response=None):
+        self.status = status
+        self._body = body
+        self._response = response
+
+    def read(self):
+        if self._body is not None:
+            return self._body
+        if self._response is not None:
+            return self._response.read()
+        return b""
+
+    def iter_lines(self):
+        if self._response is None:
+            return
+        while True:
+            line = self._response.readline()
+            if not line:
+                break
+            yield line.rstrip(b"\n")
+
+
+def http_request(method, url, headers, body=None, stream=False, timeout=300):
+    data = None
+    if body is not None:
+        if isinstance(body, (dict, list)):
+            data = json.dumps(body).encode("utf-8")
+            headers.setdefault("Content-Type", "application/json")
+        elif isinstance(body, bytes):
+            data = body
+        else:
+            data = str(body).encode("utf-8")
+
+    headers.setdefault("User-Agent", "oc-cc/0.1.0")
+    headers.setdefault("Accept", "application/json, text/event-stream")
+
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        resp = urllib.request.urlopen(req, timeout=timeout)
+        if stream:
+            return HTTPResponse(resp.status, response=resp)
+        return HTTPResponse(resp.status, body=resp.read())
+    except urllib.error.HTTPError as e:
+        return HTTPResponse(e.code, body=e.read())
 
 
 def normalize_messages(anthropic_messages):
@@ -348,14 +397,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/v1/models":
             try:
-                r = requests.get(f"{BASE_URL}/models", headers={
+                r = http_request("GET", f"{BASE_URL}/models", headers={
                     "Authorization": f"Bearer {load_api_key()}",
                 }, timeout=30)
-                self.send_response(r.status_code)
+                self.send_response(r.status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
-                self.wfile.write(r.content)
+                self.wfile.write(r.read())
             except Exception as e:
                 self.send_json(500, {"error": str(e)})
             return
@@ -382,13 +431,14 @@ class Handler(BaseHTTPRequestHandler):
         stream = bool(body.get("stream", True))
 
         try:
-            r = requests.post(
+            r = http_request(
+                "POST",
                 f"{BASE_URL}/chat/completions",
                 headers={
                     "Content-Type": "application/json",
                     "Authorization": f"Bearer {load_api_key()}",
                 },
-                json=openai_body,
+                body=openai_body,
                 stream=True,
                 timeout=300,
             )
@@ -396,23 +446,25 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(502, {"error": f"upstream request failed: {e}"})
             return
 
-        if not r.ok:
+        if r.status >= 400:
             try:
-                err = r.json()
+                err = json.loads(r.read())
             except Exception:
-                err = {"raw": r.text}
-            self.send_json(r.status_code, {"error": "upstream error", "details": err})
+                err = {"raw": r.read().decode("utf-8", errors="replace")}
+            self.send_json(r.status, {"error": "upstream error", "details": err})
             return
 
         if stream:
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "keep-alive")
+            self.send_header("Connection", "close")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             for event, data in translate_events(r.iter_lines()):
                 send_event(self.wfile, event, data)
+            self.wfile.flush()
+            return
         else:
             payload = aggregate_response(r)
             self.send_json(200, payload)
