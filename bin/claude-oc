@@ -1,0 +1,16 @@
+#!/bin/bash
+# Claude Code wrapper that routes Anthropic API calls through the local
+# OpenCode Go proxy (oc-cc).
+
+PORT=9877
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROXY_SCRIPT="${SCRIPT_DIR}/../oc_cc/proxy.py"
+
+# Start proxy if not already listening.
+if ! ss -tln 2>/dev/null | grep -q ":${PORT} "; then
+    python3 "$PROXY_SCRIPT" --port "$PORT" >/dev/null 2>&1 &
+    sleep 1
+fi
+
+export ANTHROPIC_BASE_URL="http://127.0.0.1:${PORT}"
+exec claude "$@"
