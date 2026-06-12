@@ -25,7 +25,8 @@ The proxy:
 ## Install
 
 ```bash
-cd ~/Project/py-proj/oc-cc
+git clone https://github.com/Alg0rix/oc-cc.git
+cd oc-cc
 pip install -r requirements.txt
 ```
 
@@ -47,19 +48,19 @@ export OPENCODE_GO_BASE_URL=https://opencode.ai/zen/go/v1
 ### Interactive
 
 ```bash
-~/Project/py-proj/oc-cc/bin/claude-oc
+./bin/claude-oc
 ```
 
 ### One-shot
 
 ```bash
-~/Project/py-proj/oc-cc/bin/claude-oc -p "say hi only" --model claude-sonnet-4-6
+./bin/claude-oc -p "say hi only" --model claude-sonnet-4-6
 ```
 
 ### Auto mode (skip permission prompts)
 
 ```bash
-~/Project/py-proj/oc-cc/bin/claude-oc --dangerously-skip-permissions -p "task"
+./bin/claude-oc --dangerously-skip-permissions -p "task"
 ```
 
 ## Files
